@@ -5,7 +5,7 @@ function test_help() {
   local out
   out=$(rebase-on-squashed.sh -h 2>&1)
   assert_equals 0 $?
-  assert_contains "Usage: rebase-on-squashed.sh" "$out"
+  assert_contains "usage: rebase-on-squashed.sh" "$out"
 }
 
 function test_version() {
