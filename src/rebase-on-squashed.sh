@@ -8,7 +8,7 @@
 
 set -euo pipefail
 
-__VERSION__="0.1.1"
+__VERSION__="0.1.2"
 __AUTHOR__="Marcin Konowalczyk"
 
 ## LOGGING #####################################################################
@@ -153,7 +153,7 @@ function main () {
     git commit \
         --allow-empty \
         --author="$(git log -1 --pretty=format:'%an <%ae>' "$TARGET_BRANCH")" \
-        -m "Squashed branch $TARGET_BRANCH at $(git rev-parse --short "$TARGET_BRANCH")"
+        -m "feat!: Squashed branch $TARGET_BRANCH at $(git rev-parse --short "$TARGET_BRANCH")"
 
     _info "Rebasing $CURRENT_BRANCH on top of $temp_branch"
     if [[ "$HARD_MODE" -eq 1 ]]; then
@@ -189,7 +189,11 @@ function main () {
 
     git checkout "$CURRENT_BRANCH"
     # rebase, but only the commits up to the merge base with the trunk branch
-    git rebase --onto "$temp_branch" "$current_merge_base" "$CURRENT_BRANCH"
+    local cmd="git rebase \
+        -X theirs \
+        --onto \"$temp_branch\" \"$current_merge_base\" \"$CURRENT_BRANCH\""
+    _info "Running: $cmd"
+    eval "$cmd"
 
     if [[ "$HARD_MODE" -eq 1 ]]; then
         git branch -D "$current_backup_branch" || true

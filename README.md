@@ -57,3 +57,4 @@ and also `branch-at-e` on top of `branch-at-b` with `--hard` flag:
 - [ ] more readable test repo
 - [ ] test remote target
 - [ ] test target in unrelated history
+- [ ] Multiple rebases
