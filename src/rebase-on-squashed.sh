@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
+# spellchecker: ignore Marcin Konowalczyk unmatch
 
 # Rebases the current branch on top of a squashed version of the target branch.
-# Usage: rebase-on-squashed.sh [--hard] <target-branch...>
+# Usage: rebase-on-squashed.sh [--hard] <trunk-branch> <target-branch...>
 # If --hard is provided, the files in the target branch will be kept track of,
 # and any changes to those files in the current branch will be discarded.
 
 set -euo pipefail
 
-__VERSION__="0.1.0"
+__VERSION__="0.1.1"
+__AUTHOR__="Marcin Konowalczyk"
 
 ## LOGGING #####################################################################
 
@@ -40,48 +42,47 @@ function _not_implemented() {
 ################################################################################
 
 function usage () {
-    echo "Usage: rebase-on-squashed.sh [--hard] <target-branch...>"
+    echo "Usage: rebase-on-squashed.sh [--hard] [--trunk <trunk-branch>] <target-branch...>"
     echo ""
     echo "Rebases the current branch on top of a squashed version of the target branch."
     echo ""
     echo "Options:"
-    echo "  --hard          Discard changes to files in the target branch."
-    echo "  -h, --help     Show this help message and exit."
-    echo "  -v, --version  Show version information and exit."
+    echo "  --hard            Discard changes to files in the target branch."
+    echo "  --trunk <branch>  Specify the trunk branch (default: main)."
+    echo "  -h, --help        Show this help message and exit."
+    echo "  -v, --version     Show version information and exit."
 }
 
 HARD_MODE=0
+TRUNK_BRANCH="main"
 TARGET_BRANCHES=()
 TARGET_BRANCH=""
 CURRENT_BRANCH=""
 
 _TEMP_BRANCH=""
 
-function setup () {
-
-    HARD_MODE=0
-    HELP=0
-    VERSION=0
+function setup() {
     while [[ "$#" -gt 0 ]]; do
         case "$1" in
             --hard) HARD_MODE=1; shift ;;
-            -h|--help) HELP=1; shift ;;
-            -v|--version) VERSION=1; shift ;;
+            -h|--help)
+                usage
+                exit 0 ;;
+            -v|--version)
+                echo "rebase-on-squashed.sh version $__VERSION__"
+                exit 0 ;;
+            --trunk) 
+                if [[ -z "${2:-}" ]]; then
+                    _error "--trunk requires an argument."
+                    usage
+                    exit 1
+                fi
+                TRUNK_BRANCH="$2"; shift 2 ;;
             --) shift; break ;;
             -*) _error "Unknown option: $1"; usage ;;
             *) break ;;
         esac
     done
-
-    if [[ "$HELP" -eq 1 ]]; then
-        usage
-        exit 0
-    fi
-
-    if [[ "$VERSION" -eq 1 ]]; then
-        echo "rebase-on-squashed.sh version $__VERSION__"
-        exit 0
-    fi
 
     if [[ "$#" -lt 1 ]]; then
         usage
@@ -111,12 +112,30 @@ function main () {
         _info "Hard mode enabled: changes to files in the target branch will be discarded."
     fi
 
+    _info "Current branch: $CURRENT_BRANCH"
+    _info "Target branch: $TARGET_BRANCH"
+
     # stash all changes
     if ! git diff --quiet || ! git diff --cached --quiet; then
         _info "Stashing changes..."
         git stash push -u -m "rebase-on-squashed: auto-stash"
         trap 'git stash pop || true' EXIT
     fi
+
+    # make sure the target branch has a merge base with the trunk branch
+    local target_merge_base
+    target_merge_base=$(git merge-base "$TRUNK_BRANCH" "$TARGET_BRANCH" || true)
+    if [[ -z "$target_merge_base" ]]; then
+        _fatal "The target branch '$TARGET_BRANCH' has no common ancestor with the trunk branch '$TRUNK_BRANCH'."
+    fi
+    _info "Found common ancestor between $TRUNK_BRANCH and $TARGET_BRANCH: $target_merge_base"
+
+    local current_merge_base
+    current_merge_base=$(git merge-base "$TRUNK_BRANCH" "$CURRENT_BRANCH" || true)
+    if [[ -z "$current_merge_base" ]]; then
+        _fatal "The current branch '$CURRENT_BRANCH' has no common ancestor with the trunk branch '$TRUNK_BRANCH'."
+    fi
+    _info "Found common ancestor between $TRUNK_BRANCH and $CURRENT_BRANCH: $current_merge_base"
 
     # create a new squashed version of the target branch
     local temp_branch="temp/rebase-on-squashed/${CURRENT_BRANCH//\//-}-on-${TARGET_BRANCH//\//-}"
@@ -127,20 +146,53 @@ function main () {
 
     _info "Creating temporary branch $temp_branch with squashed changes from $TARGET_BRANCH"
     git checkout -b "$temp_branch" "$TARGET_BRANCH"
+    # shellcheck disable=SC2064
     trap "git checkout \"$CURRENT_BRANCH\"; git branch -D \"$temp_branch\" || true" EXIT
     git reset --soft "$(git merge-base "$TARGET_BRANCH" "$CURRENT_BRANCH")"
-    git commit -m "Squashed changes from $TARGET_BRANCH"=
+    
+    git commit \
+        --allow-empty \
+        --author="$(git log -1 --pretty=format:'%an <%ae>' "$TARGET_BRANCH")" \
+        -m "Squashed branch $TARGET_BRANCH at $(git rev-parse --short "$TARGET_BRANCH")"
 
     _info "Rebasing $CURRENT_BRANCH on top of $temp_branch"
     if [[ "$HARD_MODE" -eq 1 ]]; then
         # in hard mode, we want to keep track of the files in the target branch
         # and discard any changes to those files in the current branch
-        _not_implemented "Hard mode is not implemented yet."    else
-        git checkout "$CURRENT_BRANCH"
-        git rebase "$temp_branch"
-    else
-        git checkout "$CURRENT_BRANCH"
-        git rebase "$temp_branch"
+        # find files which are different between the target branch and its merge base with the trunk branch
+        local target_files
+        target_files=$(git diff --name-only "$target_merge_base" "$TARGET_BRANCH")
+        target_files=$(echo "$target_files" | tr '\n' ' ')
+        if [[ -z "$target_files" ]]; then
+            _warn "No files changed between $target_merge_base and $TARGET_BRANCH. Nothing to discard."
+            git checkout "$CURRENT_BRANCH"
+            git rebase "$temp_branch"
+            return
+        fi
+        _info "Files changed in $TARGET_BRANCH since $target_merge_base: $target_files"
+        
+        # Create backup of the current branch
+        local current_backup_branch="backup/rebase-on-squashed/${CURRENT_BRANCH//\//-}"
+        if git show-ref --verify --quiet "refs/heads/$current_backup_branch"; then
+            _info "Deleting existing backup branch $current_backup_branch"
+            git branch -D "$current_backup_branch"
+        fi
+        git checkout -b "$current_backup_branch" "$CURRENT_BRANCH"
+
+        # modify the history of the current branch (up to the merge base with the trunk branch)
+        # to discard changes to the target files. If the modified commit becomes empty, discard it.
+        FILTER_BRANCH_SQUELCH_WARNING=1 git filter-branch \
+            --force --prune-empty \
+            --index-filter "git rm --cached --ignore-unmatch $target_files" \
+            -- "$current_merge_base..$CURRENT_BRANCH"
+    fi
+
+    git checkout "$CURRENT_BRANCH"
+    # rebase, but only the commits up to the merge base with the trunk branch
+    git rebase --onto "$temp_branch" "$current_merge_base" "$CURRENT_BRANCH"
+
+    if [[ "$HARD_MODE" -eq 1 ]]; then
+        git branch -D "$current_backup_branch" || true
     fi
 }
 
