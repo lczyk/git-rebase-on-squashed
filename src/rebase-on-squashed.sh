@@ -138,6 +138,9 @@ function main () {
         _not_implemented "Hard mode is not implemented yet."    else
         git checkout "$CURRENT_BRANCH"
         git rebase "$temp_branch"
+    else
+        git checkout "$CURRENT_BRANCH"
+        git rebase "$temp_branch"
     fi
 }
 
