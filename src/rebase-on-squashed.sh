@@ -8,7 +8,7 @@
 
 set -euo pipefail
 
-__VERSION__="0.1.2"
+__VERSION__="0.1.3"
 __AUTHOR__="Marcin Konowalczyk"
 
 ## LOGGING #####################################################################
@@ -181,9 +181,18 @@ function main () {
 
         # modify the history of the current branch (up to the merge base with the trunk branch)
         # to discard changes to the target files. If the modified commit becomes empty, discard it.
+        # NOTE: we do not want to remove files from history on every commit. We just want to, 
+        #       for every commit, discard any changes to the target files.
         FILTER_BRANCH_SQUELCH_WARNING=1 git filter-branch \
             --force --prune-empty \
-            --index-filter "git rm --cached --ignore-unmatch $target_files" \
+            --index-filter '
+                changed_files=$(git diff-tree --no-commit-id --name-only -r "$GIT_COMMIT")
+                for file in '"$target_files"'; do
+                    if echo "$changed_files" | grep -q "^$file$"; then
+                        git rm --cached --ignore-unmatch "$file"
+                    fi
+                done
+            ' \
             -- "$current_merge_base..$CURRENT_BRANCH"
     fi
 
