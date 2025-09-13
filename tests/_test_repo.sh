@@ -26,14 +26,14 @@ function commit() {
         git -C "$__TEST_REPO__" commit --quiet --allow-empty -m "$1"
 }
 
-function rebase-on-squashed() {
+function git-rebase-on-squashed() {
     GIT_AUTHOR_NAME=$NAME \
     GIT_AUTHOR_EMAIL=$EMAIL \
     GIT_AUTHOR_DATE="$DATE" \
     GIT_COMMITTER_NAME="$GIT_AUTHOR_NAME" \
     GIT_COMMITTER_EMAIL="$GIT_AUTHOR_EMAIL" \
     GIT_COMMITTER_DATE="$DATE" \
-        rebase-on-squashed.sh -C "$__TEST_REPO__" "$@"
+        git -C "$__TEST_REPO__" rebase-on-squashed "$@"
 }
 
 function recreate_empty_test_repo() {

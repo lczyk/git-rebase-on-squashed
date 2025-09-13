@@ -2,13 +2,13 @@
 # spellchecker: ignore Marcin Konowalczyk unmatch
 
 # Rebases the current branch on top of a squashed version of the base branch.
-# Usage: rebase-on-squashed.sh [--hard] <trunk-branch> <base-branch...>
+# Usage: git-rebase-on-squashed [--hard] <trunk-branch> <base-branch...>
 # If --hard is provided, the files in the base branch will be kept track of,
 # and any changes to those files in the current branch will be discarded.
 
 set -euo pipefail
 
-__VERSION__="0.1.4"
+__VERSION__="0.2.0"
 __AUTHOR__="Marcin Konowalczyk"
 
 ## LOGGING #####################################################################
@@ -45,8 +45,8 @@ function _not_implemented() {
 ################################################################################
 
 _HELP="
-usage: rebase-on-squashed.sh [-h | --help] [v | --version]
-       [--hard] [--trunk <trunk-branch>] [-C <path>]
+usage: git-rebase-on-squashed [-h | --help] [v | --version]
+       [--hard] [--trunk <trunk-branch>]
        <base-branch...>
 
 Rebases the current branch on top of a squashed version of the base branch.
@@ -56,8 +56,6 @@ Options:
                         Any changes to those files in the current branch will be
                         discarded.
   --trunk <branch>      Specify the trunk branch (default: main).
-  -C <path>             Change to directory <path> before doing anything.
-                        (default: current directory)
   -b, --branch <branch> Specify the branch to rebase. If not provided, the
                         current branch will be used.
   -q, --quiet           Suppress informational messages.
@@ -76,7 +74,6 @@ BASE_BRANCHES=()
 BASE_BRANCH=""
 CURRENT_BRANCH=""
 TARGET_BRANCH=""
-REPO_PATH="$PWD"
 
 function setup() {
 
@@ -95,12 +92,9 @@ function setup() {
                 usage
                 exit 0 ;;
             -v|--version)
-                echo "rebase-on-squashed.sh version $__VERSION__"
+                echo "git-rebase-on-squashed version $__VERSION__"
                 exit 0 ;;
             -q|--quiet) QUIET=1; shift ;;
-            -C) 
-                _requires_arg "-C" "$2"
-                REPO_PATH="$2"; shift 2 ;;
             --trunk) 
                 _requires_arg "--trunk" "$2"
                 TRUNK_BRANCH="$2"; shift 2 ;;
@@ -132,18 +126,6 @@ function setup() {
 }
 
 function main () {
-    if [[ ! -d "$REPO_PATH/.git" ]]; then
-        _fatal "Directory $REPO_PATH is not a git repository."
-    fi
-
-    # patch git to always run in the specified directory
-    if [[ "$REPO_PATH" != "$PWD" ]]; then
-        _info "Operating in directory $REPO_PATH"
-        function git() {
-            command git -C "$REPO_PATH" "$@"
-        }
-    fi
-
     if [[ -n "$TARGET_BRANCH" ]]; then
         _info "Checking out target branch $TARGET_BRANCH"
         git checkout --quiet "$TARGET_BRANCH"

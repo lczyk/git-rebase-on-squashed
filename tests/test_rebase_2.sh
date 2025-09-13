@@ -26,7 +26,7 @@ function test_rebase() {
     * 2bb8f03 Initial commit
   " | inline_tree | cat -A)" "$(git_tree | cat -A)"
 
-  rebase-on-squashed --quiet --branch feature-2 feature-1
+  git-rebase-on-squashed --quiet --branch feature-2 feature-1
 
   local expected_tree=$(echo "
     * 358b220 (feature-1) Create cherry
@@ -42,7 +42,7 @@ function test_rebase() {
   assert_equals "$expected_tree" "$(git_tree)"
 
   # rebase on squashed again. no changes
-  rebase-on-squashed --quiet --branch feature-2 feature-1
+  git-rebase-on-squashed --quiet --branch feature-2 feature-1
 
   assert_equals "$expected_tree" "$(git_tree)"
 
