@@ -1,28 +1,79 @@
 
 source _common.sh
 
-function test_no_hardmode() {
-  if [[ ! -d "$__TEST_REPO__" ]]; then
-    echo "No test repository"
-    skip_if 'true' 'No test repository'
-    return
-  fi
-  (
-    cd "$__TEST_REPO__" || exit 1
-    git checkout branch-at-d
-    git-rebase-on-squashed branch-at-b
-  )
-}
+# functions for creating a test repo
+source _test_repo.sh
 
-function test_hardmode() {
-  if [[ ! -d "$__TEST_REPO__" ]]; then
-    echo "No test repository"
-    skip_if 'true' 'No test repository'
-    return
-  fi
-  (
-    cd "$__TEST_REPO__" || exit 1
-    git checkout branch-at-e
-    git-rebase-on-squashed --hard branch-at-b
-  )
+
+function test_rebase() {
+  recreate_empty_test_repo > /dev/null
+
+  local ref_a=$(create_commit "apple")
+  local ref_b=$(create_commit "banana")
+
+  checkout_branch feature-1 "$ref_a"
+  create_commit "cherry" > /dev/null
+
+  checkout_branch feature-2 "$ref_b"
+  create_commit "date" > /dev/null
+
+  assert_equals "$(echo "
+    * 358b220 (feature-1) Create cherry
+    | * 367c12f (feature-2) Create date
+    | * a270c96 (main) Create banana
+    |/  
+    * 0198d05 Create apple
+    * 2bb8f03 Initial commit
+  " | inline_tree)" "$(git_tree)"
+
+  git-rebase-on-squashed --quiet --branch feature-2 feature-1
+
+  local expected_tree=$(echo "
+    * 358b220 (feature-1) Create cherry
+    | * 3c69145 (feature-2) Create date
+    | * 06a41bb feat(ros)!: Squashed branch 'feature-1' at 358b220
+    |/  
+    | * a270c96 (main) Create banana
+    |/  
+    * 0198d05 Create apple
+    * 2bb8f03 Initial commit
+  " | inline_tree)
+
+  assert_equals "$expected_tree" "$(git_tree)"
+
+  # rebase on squashed again. no changes
+  git-rebase-on-squashed --quiet --branch feature-2 feature-1
+
+  assert_equals "$expected_tree" "$(git_tree)"
+
+  # create one more commit on feature-1
+  checkout_branch feature-1
+  create_commit "elderberry" > /dev/null
+
+  assert_equals "$(echo "
+    * 98ef8ca (feature-1) Create elderberry
+    * 358b220 Create cherry
+    | * 3c69145 (feature-2) Create date
+    | * 06a41bb feat(ros)!: Squashed branch 'feature-1' at 358b220
+    |/  
+    | * a270c96 (main) Create banana
+    |/  
+    * 0198d05 Create apple
+    * 2bb8f03 Initial commit
+  " | inline_tree)" "$(git_tree)"
+
+  # rebase on squashed again
+  git-rebase-on-squashed --quiet --branch feature-2 feature-1
+
+  assert_equals "$(echo "
+    * 98ef8ca (feature-1) Create elderberry
+    * 358b220 Create cherry
+    | * 06740af (feature-2) Create date
+    | * 3a458ef feat(ros)!: Squashed branch 'feature-1' at 98ef8ca
+    |/  
+    | * a270c96 (main) Create banana
+    |/  
+    * 0198d05 Create apple
+    * 2bb8f03 Initial commit
+  " | inline_tree)" "$(git_tree)"
 }

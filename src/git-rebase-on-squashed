@@ -42,6 +42,40 @@ function _not_implemented() {
     exit 2
 }
 
+
+# Adapted from post by Richard Hansen:
+# https://stackoverflow.com/a/7287873/2531987
+# CC-BY-SA 3.0
+
+# appends a command to a trap
+#
+# - 1st arg:  code to add
+# - remaining args:  names of traps to modify
+#
+function trap_add() {
+    local trap_add_cmd="$1"
+    shift || _fatal "${FUNCNAME[0]}: no command to add to trap"
+    [[ "$#" -ge 1 ]] || _fatal "${FUNCNAME[0]}: no trap names given"
+    extract_trap_cmd() { printf '%s\n' "$3"; }
+    for trap_add_name in "$@"; do
+        local existing_cmd=$(trap -p "${trap_add_name}")
+        local new_cmd=""
+        if [[ -z "$existing_cmd" ]]; then
+            new_cmd="$trap_add_cmd"
+        else
+            new_cmd="$(
+                printf '%s\n' "${trap_add_cmd}"
+                eval "extract_trap_cmd $existing_cmd"
+            )"
+        fi
+        trap -- "$new_cmd" "$trap_add_name" || _fatal "unable to modify trap ${trap_add_name}"
+    done
+}
+# set the trace attribute for the above function. this is
+# required to modify DEBUG or RETURN traps because functions don't
+# inherit them unless the trace attribute is set
+declare -f -t trap_add
+
 ################################################################################
 
 _HELP="
@@ -125,11 +159,25 @@ function setup() {
     CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
 }
 
+function _remove_empty_elements() {
+    local -n arr=$1
+    local i=0
+    while [[ $i -lt ${#arr[@]} ]]; do
+        if [[ -z "${arr[$i]}" ]]; then
+            unset 'arr[i]'
+        else
+            ((i++)) || true
+        fi
+    done
+    # reindex the array
+    arr=("${arr[@]}")
+}
+
 function main () {
     if [[ -n "$TARGET_BRANCH" ]]; then
         _info "Checking out target branch $TARGET_BRANCH"
         git checkout --quiet "$TARGET_BRANCH"
-        trap 'git checkout --quiet "$CURRENT_BRANCH"' EXIT
+        trap_add 'git checkout --quiet "$CURRENT_BRANCH"' EXIT
     else
         TARGET_BRANCH="$CURRENT_BRANCH"
     fi
@@ -145,7 +193,7 @@ function main () {
     if ! git diff --quiet || ! git diff --cached --quiet; then
         _info "Stashing changes..."
         git stash push -u -m "rebase-on-squashed: auto-stash"
-        trap 'git stash pop || true' EXIT
+        trap_add 'git stash pop || true' EXIT
     fi
 
     # make sure the base branch has a merge base with the trunk branch
@@ -156,29 +204,59 @@ function main () {
     fi
     _info "Found common ancestor between $TRUNK_BRANCH and $BASE_BRANCH: $base_merge_base"
 
-    local current_merge_base
-    current_merge_base=$(git merge-base "$TRUNK_BRANCH" "$TARGET_BRANCH" || true)
-    if [[ -z "$current_merge_base" ]]; then
-        _fatal "The current branch '$TARGET_BRANCH' has no common ancestor with the trunk branch '$TRUNK_BRANCH'."
+    local target_merge_base
+    target_merge_base=$(git merge-base "$TRUNK_BRANCH" "$TARGET_BRANCH" || true)
+    if [[ -z "$target_merge_base" ]]; then
+        _fatal "The target branch '$TARGET_BRANCH' has no common ancestor with the trunk branch '$TRUNK_BRANCH'."
     fi
-    _info "Found common ancestor between $TRUNK_BRANCH and $TARGET_BRANCH: $current_merge_base"
+    _info "Found common ancestor between $TRUNK_BRANCH and $TARGET_BRANCH: $target_merge_base"
+
+    if [[ "$target_merge_base" != "$base_merge_base" ]]; then
+        _warn "The base branch '$BASE_BRANCH' and the target branch '$TARGET_BRANCH' have different common ancestors with the trunk branch '$TRUNK_BRANCH'."
+        _warn "This may lead to unexpected results."
+    fi
+    # Create backup of the target branch
+    local backup_target_branch="backup/rebase-on-squashed/${TARGET_BRANCH//\//-}"
+    if git show-ref --verify --quiet "refs/heads/$backup_target_branch"; then
+        _info "Deleting existing backup branch $backup_target_branch"
+        git branch -D "$backup_target_branch"
+    fi
+    git branch --quiet "$backup_target_branch" "$TARGET_BRANCH"
+    trap_add '[[ $? -eq 0 ]] && git branch --quiet -D "$backup_target_branch" || true' EXIT
 
     # check in the history of the current branch if we already have a squash commit for the base branch
-    local message_head="feat(ros)!: Squashed branch '$BASE_BRANCH'"
-    local message_tail="$(git rev-parse --short "$BASE_BRANCH")"
+    local -r message_prefix="feat(ros)!"
+    local -r message_sha="$(git rev-parse --short "$BASE_BRANCH")"
 
-    local existing_squash_commit
-    existing_squash_commit=$(git log --grep="^$message_head" --pretty=format:"%H" -1 || true)
-    if [[ -n "$existing_squash_commit" ]]; then
-        local existing_squash_commit_message
-        existing_squash_commit_message=$(git log -1 --pretty=format:"%s" "$existing_squash_commit" || true)
-        local existing_squash_commit_tail
-        existing_squash_commit_tail=$(echo "$existing_squash_commit_message" | sed -E "s/.* at (.+)$/\1/" || true)
-        if [[ "$existing_squash_commit_tail" == "$message_tail" ]]; then
-            _info "Branch '$TARGET_BRANCH' already has a squash commit for '$BASE_BRANCH' ($existing_squash_commit). Nothing to do."
+    # array of commits with messages starting with the expected prefix
+    declare -a squash_commits
+    readarray -t squash_commits <<<"$(git log --grep="^$message_prefix" --pretty=format:"%H" || true)"
+    _remove_empty_elements squash_commits
+    if [[ "${#squash_commits[@]}" -gt 1 ]]; then
+        _not_implemented "Multiple squash commits found in the history of '$TARGET_BRANCH'. Handling this case is not implemented yet."
+    fi
+
+    if [[ "${#squash_commits[@]}" -eq 1 ]]; then
+        _info "Found existing squash commit in the history of '$TARGET_BRANCH'."
+        # There are some messages starting with the expected prefix.
+        local squash_commit="${squash_commits[0]}"
+        squash_commit_message=$(git log -1 --pretty=format:"%s" "$squash_commit" || true)
+        squash_commit_message="${squash_commit_message#"$message_prefix: "}"
+        local squash_commit_base=$(echo "$squash_commit_message" | sed -E "s/^Squashed branch '(.+)' at .*$/\1/" || true)
+        if [[ "$squash_commit_base" != "$BASE_BRANCH" ]]; then
+            _not_implemented "Found a squash commit ($squash_commit) for a different base branch ($squash_commit_base). Handling this case is not implemented yet."
+        fi
+        local squash_commit_sha=$(echo "$squash_commit_message" | sed -E "s/^Squashed branch '.+' at (.+)$/\1/" || true)
+        if [[ "$squash_commit_sha" == "$message_sha" ]]; then
+            _info "Branch '$TARGET_BRANCH' already has a squash commit for '$BASE_BRANCH' ($squash_commit). Nothing to do."
             exit 0
         fi
-        _not_implemented "Rebase on existing squash commit $existing_squash_commit is not implemented yet."
+        
+        # we are rebasing on a commit which is not the latest commit of the base branch
+        # we need to remove it before proceeding
+        git rebase --quiet --onto "$squash_commit^" "$squash_commit" "$TARGET_BRANCH"
+    else
+        _info "No existing squash commit found in the history of '$TARGET_BRANCH'."
     fi
 
     # create a new squashed version of the base branch
@@ -191,14 +269,14 @@ function main () {
     _info "Creating temporary branch $temp_branch with squashed changes from $BASE_BRANCH"
     git checkout --quiet -b "$temp_branch" "$BASE_BRANCH"
     # shellcheck disable=SC2064
-    trap "git checkout --quiet \"$TARGET_BRANCH\"; git branch --quiet -D \"$temp_branch\" || true" EXIT
+    trap_add "git checkout --quiet \"$TARGET_BRANCH\"; git branch --quiet -D \"$temp_branch\" || true" EXIT
     git reset --soft "$(git merge-base "$BASE_BRANCH" "$TARGET_BRANCH")"
 
     git commit \
         --quiet \
         --allow-empty \
         --author="$(git log -1 --pretty=format:'%an <%ae>' "$BASE_BRANCH")" \
-        -m "$message_head at $message_tail"
+        -m "$message_prefix: Squashed branch '$BASE_BRANCH' at $message_sha"
 
     _info "Rebasing $TARGET_BRANCH on top of $temp_branch"
     if [[ "$HARD_MODE" -eq 1 ]]; then
@@ -216,14 +294,6 @@ function main () {
         fi
         _info "Files changed in $BASE_BRANCH since $base_merge_base: $base_files"
         
-        # Create backup of the current branch
-        local current_backup_branch="backup/rebase-on-squashed/${TARGET_BRANCH//\//-}"
-        if git show-ref --verify --quiet "refs/heads/$current_backup_branch"; then
-            _info "Deleting existing backup branch $current_backup_branch"
-            git branch -D "$current_backup_branch"
-        fi
-        git checkout --quiet -b "$current_backup_branch" "$TARGET_BRANCH"
-
         # modify the history of the current branch (up to the merge base with the trunk branch)
         # to discard changes to the base files. If the modified commit becomes empty, discard it.
         # NOTE: we do not want to remove files from history on every commit. We just want to, 
@@ -238,21 +308,23 @@ function main () {
                     fi
                 done
             ' \
-            -- "$current_merge_base..$TARGET_BRANCH"
+            -- "$target_merge_base..$TARGET_BRANCH"
+        # remove the backup refs created by filter-branch
+        git for-each-ref --format="%(refname)" refs/original/ \
+            | grep "refs/original/refs/heads/$TARGET_BRANCH" \
+            | xargs -n1 git update-ref -d
     fi
 
     git checkout --quiet "$TARGET_BRANCH"
-    # rebase, but only the commits up to the merge base with the trunk branch
+    # # rebase, but only the commits up to the merge base with the trunk branch
     local cmd="git rebase \
         --quiet \
         -X theirs \
-        --onto \"$temp_branch\" \"$current_merge_base\" \"$TARGET_BRANCH\""
+        --onto \"$temp_branch\" \"$target_merge_base\" \"$TARGET_BRANCH\""
     _info "Running: $cmd"
     eval "$cmd"
 
-    if [[ "$HARD_MODE" -eq 1 ]]; then
-        git branch --quiet -D "$current_backup_branch" || true
-    fi
+    exit 0
 }
 
 setup "$@"
