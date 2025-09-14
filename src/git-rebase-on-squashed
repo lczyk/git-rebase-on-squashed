@@ -47,34 +47,32 @@ function _not_implemented() {
 # https://stackoverflow.com/a/7287873/2531987
 # CC-BY-SA 3.0
 
-# appends a command to a trap
-#
-# - 1st arg:  code to add
-# - remaining args:  names of traps to modify
-#
-function trap_add() {
-    local trap_add_cmd="$1"
+# Appends the command to the front of the existing trap command(s).
+# If the trap is not yet set, sets it to the given command.
+# Usage: defer 'echo hi' EXIT INT
+function defer() {
+    local defer_cmd="$1"
     shift || _fatal "${FUNCNAME[0]}: no command to add to trap"
     [[ "$#" -ge 1 ]] || _fatal "${FUNCNAME[0]}: no trap names given"
     extract_trap_cmd() { printf '%s\n' "$3"; }
-    for trap_add_name in "$@"; do
-        local existing_cmd=$(trap -p "${trap_add_name}")
+    for defer_name in "$@"; do
+        local existing_cmd=$(trap -p "${defer_name}")
         local new_cmd=""
         if [[ -z "$existing_cmd" ]]; then
-            new_cmd="$trap_add_cmd"
+            new_cmd="$defer_cmd"
         else
             new_cmd="$(
-                printf '%s\n' "${trap_add_cmd}"
+                printf '%s\n' "${defer_cmd}"
                 eval "extract_trap_cmd $existing_cmd"
             )"
         fi
-        trap -- "$new_cmd" "$trap_add_name" || _fatal "unable to modify trap ${trap_add_name}"
+        trap -- "$new_cmd" "$defer_name" || _fatal "unable to modify trap ${defer_name}"
     done
 }
 # set the trace attribute for the above function. this is
 # required to modify DEBUG or RETURN traps because functions don't
 # inherit them unless the trace attribute is set
-declare -f -t trap_add
+declare -f -t defer
 
 ################################################################################
 
@@ -177,7 +175,7 @@ function main () {
     if [[ -n "$TARGET_BRANCH" ]]; then
         _info "Checking out target branch $TARGET_BRANCH"
         git checkout --quiet "$TARGET_BRANCH"
-        trap_add "git checkout --quiet \"$CURRENT_BRANCH\"" EXIT
+        defer "git checkout --quiet \"$CURRENT_BRANCH\"" EXIT
     else
         TARGET_BRANCH="$CURRENT_BRANCH"
     fi
@@ -193,7 +191,7 @@ function main () {
     if ! git diff --quiet || ! git diff --cached --quiet; then
         _info "Stashing changes..."
         git stash push -u -m "rebase-on-squashed: auto-stash"
-        trap_add 'git stash pop || true' EXIT
+        defer 'git stash pop || true' EXIT
     fi
 
     # make sure the base branch has a merge base with the trunk branch
@@ -222,7 +220,7 @@ function main () {
         git branch -D "$backup_target_branch"
     fi
     git branch --quiet "$backup_target_branch" "$TARGET_BRANCH"
-    trap_add "[[ \$? -eq 0 ]] && git branch --quiet -D \"$backup_target_branch\" || true" EXIT
+    defer "[[ \$? -eq 0 ]] && git branch --quiet -D \"$backup_target_branch\" || true" EXIT
 
     # check in the history of the current branch if we already have a squash commit for the base branch
     local -r message_prefix="feat(ros)!"
@@ -269,7 +267,7 @@ function main () {
     _info "Creating temporary branch $temp_branch with squashed changes from $BASE_BRANCH"
     git checkout --quiet -b "$temp_branch" "$BASE_BRANCH"
     # shellcheck disable=SC2064
-    trap_add "git checkout --quiet \"$TARGET_BRANCH\"; git branch --quiet -D \"$temp_branch\" || true" EXIT
+    defer "git checkout --quiet \"$TARGET_BRANCH\"; git branch --quiet -D \"$temp_branch\" || true" EXIT
     git reset --soft "$(git merge-base "$BASE_BRANCH" "$TARGET_BRANCH")"
 
     git commit \
