@@ -177,7 +177,7 @@ function main () {
     if [[ -n "$TARGET_BRANCH" ]]; then
         _info "Checking out target branch $TARGET_BRANCH"
         git checkout --quiet "$TARGET_BRANCH"
-        trap_add 'git checkout --quiet "$CURRENT_BRANCH"' EXIT
+        trap_add "git checkout --quiet \"$CURRENT_BRANCH\"" EXIT
     else
         TARGET_BRANCH="$CURRENT_BRANCH"
     fi
@@ -222,7 +222,7 @@ function main () {
         git branch -D "$backup_target_branch"
     fi
     git branch --quiet "$backup_target_branch" "$TARGET_BRANCH"
-    trap_add '[[ $? -eq 0 ]] && git branch --quiet -D "$backup_target_branch" || true' EXIT
+    trap_add "[[ \$? -eq 0 ]] && git branch --quiet -D \"$backup_target_branch\" || true" EXIT
 
     # check in the history of the current branch if we already have a squash commit for the base branch
     local -r message_prefix="feat(ros)!"
@@ -316,7 +316,7 @@ function main () {
     fi
 
     git checkout --quiet "$TARGET_BRANCH"
-    # # rebase, but only the commits up to the merge base with the trunk branch
+    # rebase, but only the commits up to the merge base with the trunk branch
     local cmd="git rebase \
         --quiet \
         -X theirs \
