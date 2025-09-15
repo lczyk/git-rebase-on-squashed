@@ -8,7 +8,7 @@
 
 set -euo pipefail
 
-__VERSION__="0.2.0"
+__VERSION__="0.2.1"
 __AUTHOR__="Marcin Konowalczyk"
 
 ## LOGGING #####################################################################
@@ -171,6 +171,31 @@ function _remove_empty_elements() {
     arr=("${arr[@]}")
 }
 
+function index_filter() {
+    base_files=$1
+    # changed_files=$(git diff-tree --no-commit-id --name-only -r "$GIT_COMMIT")
+    for file in $base_files; do
+        git rm --quiet --cached --ignore-unmatch "$file"
+    done
+    # debug
+    # list staged files after removal
+    # echo "Staged files after removal:"
+    # all_files=$(git ls-files)
+    # # filter down to files in changed_files and in base_files
+    # for file in $all_files; do
+    #     for bf in $base_files; do
+    #         if [ "$file" = "$bf" ]; then
+    #             echo "bf $file"
+    #         fi
+    #     done
+    #     for cf in $changed_files; do
+    #         if [ "$file" = "$cf" ]; then
+    #             echo "cf $file"
+    #         fi
+    #     done
+    # done
+}
+
 function main () {
     if [[ -n "$TARGET_BRANCH" ]]; then
         _info "Checking out target branch $TARGET_BRANCH"
@@ -291,21 +316,14 @@ function main () {
             return
         fi
         _info "Files changed in $BASE_BRANCH since $base_merge_base: $base_files"
-        
+
         # modify the history of the current branch (up to the merge base with the trunk branch)
         # to discard changes to the base files. If the modified commit becomes empty, discard it.
         # NOTE: we do not want to remove files from history on every commit. We just want to, 
         #       for every commit, discard any changes to the base files.
         FILTER_BRANCH_SQUELCH_WARNING=1 git filter-branch \
             --force --prune-empty \
-            --index-filter '
-                changed_files=$(git diff-tree --no-commit-id --name-only -r "$GIT_COMMIT")
-                for file in '"$base_files"'; do
-                    if echo "$changed_files" | grep -q "^$file$"; then
-                        git rm --cached --ignore-unmatch "$file"
-                    fi
-                done
-            ' \
+            --index-filter "$(declare -f index_filter); index_filter '$base_files'" \
             -- "$target_merge_base..$TARGET_BRANCH"
         # remove the backup refs created by filter-branch
         git for-each-ref --format="%(refname)" refs/original/ \
