@@ -75,12 +75,13 @@ command. Be warned and *especially* don't use this option if you don't know what
 you're doing / how to fix rebases / how to recover lost branches from reflog. Also
 have remote backups. Don't be afraid of git, but always respect the git.
 
-## todos
+## todos/ideas
 
 - [x] more readable test repo
 - [ ] test remote target
 - [ ] test target in unrelated history
-- [ ] Multiple rebases
+- [ ] ? multiple rebases
 - [x] `--tree`
 - [ ] `--tree` but scan better, not just in a line
 - [ ] probably should port to python kindof like [git-filter-repo](https://github.com/newren/git-filter-repo)
+- [ ] ? way of viewing the diff sans the squashed rebase 
