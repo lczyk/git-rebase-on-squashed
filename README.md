@@ -1,60 +1,84 @@
 # git-rebase-on-squashed
-Script to rebase a bunch of stuff on top of a squashed state of another branch
+
+Rebase a branch on top of a squashed version of another one.
+
+NOTE: This tool might have a couple of sharp edges! Do not use if you are not
+comfortable with normal git rebasing, and potentially fixing any problems which
+may arise. Always back up your branches!
+
+## about
+
+Lets consider a tree with two feature branches:
 
 ```
-* 49f9f70 (HEAD -> branch-at-e) Modify b1 in branch-at-e
-* 5bb259c Create e2
-* cf4504f Create e1
-| * 7b51399 (branch-at-d) Create d2
-| * fcefdd4 Create d1
-| | * 75898a3 (branch-at-b) Create b2
-| | * e5ef21f Create b1
-| | | * f9047e5 (main) Create f
-| |_|/  
-|/| |   
-* | | 2ba098a Create e
-|/ /  
-* | 8bea592 Create d
-* | ddf46d9 Create c
+...
+| * 97f9c73 (B) feat: different feature which depends on the spice
+|/ 
+* 64da366 fix: something
+* b63f680 feat: something
+|
+| * b5007af (A) feat: even more spice
+| * ddf46d9 feat: my spicy feature
 |/  
-* 32c24f0 Create b
-* 3444ce5 Create a
-* f28c115 Initial commit
+* 32c24f0 chore: update some version
+* 3444ce5 feat: do something
+...
 ```
 
-after rebasing `branch-at-d` on top of `branch-at-b`,
-and also `branch-at-e` on top of `branch-at-b` with `--hard` flag:
+Feature branch B wants all the changes from feature branch `A`, but branch `A`
+is not merged into the "trunk" branch (usually main). We can just rebase `B`
+on top of `A`, but then as `A` may grow in number of commits, it becomes cumbersome,
+especially if there is a chain of these kind of rebases.
+
+Instead, we can squash all the commits we're rebasing on top of into one
+convenient commit. This is what this tool does. If we run:
+
+```bash
+git rebase-on-squashed --trunk main --branch B A
+```
+
+(or, since `main` is the default, and if we have `B` checked out, just
+`git rebase-on-squashed A`)
+
+we get:
 
 ```
-* 7b285e2 (HEAD -> branch-at-d) Create d2
-* 97f9c73 Create d1
-* 4cc6d7e Squashed changes from branch-at-b
-| * b63f680 (branch-at-e) Create e2
-| * 64da366 Create e1
-| * 0d45941 Squashed changes from branch-at-b
+...
+| * 7b285e2 (B) feat: different feature which depends on the spice
+| * 4cc6d7e feat(ros)!: Squashed branch 'A' at b5007af
+|/ 
+* 64da366 fix: something
+* b63f680 feat: something
+|
+| * b5007af (A) feat: even more spice
+| * ddf46d9 feat: my spicy feature
 |/  
-| * 79c677c Modify b1 in branch-at-e
-| * b5007af Create e2
-| * 481bc72 Create e1
-| | * e0608ad (branch-at-b) Create b2
-| | * 60ab6d0 Create b1
-| |/  
-|/|   
-| | * e14bc27 (main) Create f
-| |/  
-| * 849699b Create e
-| * 542fd1c Create d
-| * 8813fdc Create c
-|/  
-* ec8ff27 Create b
-* c1e2f9d Create a
-* 02e2ee8 Initial commit
+* 32c24f0 chore: update some version
+* 3444ce5 feat: do something
+...
 ```
 
+## hardmode
+
+Given the example above, hardmode (enabled with the `--hard` flag), is actually
+quite simple to explain. Lets imagine that i *know* that `B` does not touch any
+of the same files as `A` -- `B` depends on the existence of these files, but
+does not modify them. hardmode goes through all the commits of B and does any
+appropriate history rewrites to remove any changes that `B` might make to any of
+the files in `A`. Useful if you've already made a bunch of commits on `B` which
+touch `A`'s files, but now you want to filter them out.
+
+NOTE: This uses the [infamous](https://git-scm.com/docs/git-filter-branch#_warning) `git filter-branch`
+command. Be warned and *especially* don't use this option if you don't know what
+you're doing / how to fix rebases / how to recover lost branches from reflog. Also
+have remote backups. Don't be afraid of git, but always respect the git.
 
 ## todos
 
-- [ ] more readable test repo
+- [x] more readable test repo
 - [ ] test remote target
 - [ ] test target in unrelated history
 - [ ] Multiple rebases
+- [x] `--tree`
+- [ ] `--tree` but scan better, not just in a line
+- [ ] probably should port to python kindof like [git-filter-repo](https://github.com/newren/git-filter-repo)
