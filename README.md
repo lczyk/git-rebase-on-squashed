@@ -1,5 +1,7 @@
 # git-rebase-on-squashed
 
+[![bash_unit tests](https://github.com/lczyk/rebase-on-squashed/actions/workflows/test.yaml/badge.svg)](https://github.com/lczyk/rebase-on-squashed/actions/workflows/test.yaml)
+
 Rebase a branch on top of a squashed version of another one.
 
 NOTE: This tool might have a couple of sharp edges! Do not use if you are not
