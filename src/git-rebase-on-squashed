@@ -8,7 +8,7 @@
 
 set -euo pipefail
 
-__VERSION__="0.2.1"
+__VERSION__="0.2.2"
 __AUTHOR__="Marcin Konowalczyk"
 
 ## LOGGING #####################################################################
@@ -90,6 +90,8 @@ Options:
   --trunk <branch>      Specify the trunk branch (default: main).
   -b, --branch <branch> Specify the branch to rebase. If not provided, the
                         current branch will be used.
+  --tree                (experimental) Recursively print the tree of commits
+                        which are rebased on top of one another.
   -q, --quiet           Suppress informational messages.
   -h, --help            Show this help message and exit.
   -v, --version         Show version information and exit.
@@ -100,6 +102,7 @@ function usage () {
 }
 
 QUIET=0
+TREE=0
 HARD_MODE=0
 TRUNK_BRANCH="main"
 BASE_BRANCHES=()
@@ -127,6 +130,7 @@ function setup() {
                 echo "git-rebase-on-squashed version $__VERSION__"
                 exit 0 ;;
             -q|--quiet) QUIET=1; shift ;;
+            --tree) TREE=1; shift ;;
             --trunk) 
                 _requires_arg "--trunk" "$2"
                 TRUNK_BRANCH="$2"; shift 2 ;;
@@ -196,6 +200,45 @@ function index_filter() {
     # done
 }
 
+function main_tree() {
+    local branch="$CURRENT_BRANCH"
+    local branches=()
+    local shas=()
+    local N=0
+    while true; do
+        # echo "${prefix}${branch}"
+        branches+=("$branch")
+        shas+=("$(git rev-parse --short "$branch")")
+        ((N++)) || true
+
+        prefix+="  "
+        local message_prefix="feat(ros)!"
+        local squash_commit
+        squash_commit=$(git log --grep="^$message_prefix" --pretty=format:"%H" "$branch" | head -n1 || true)
+        if [[ -z "$squash_commit" ]]; then
+            break
+        fi
+        local squash_commit_message
+        squash_commit_message=$(git log -1 --pretty=format:"%s" "$squash_commit" || true)
+        squash_commit_message="${squash_commit_message#"$message_prefix: "}"
+        local squash_commit_base
+        squash_commit_base=$(echo "$squash_commit_message" | sed -E "s/^Squashed branch '(.+)' at .*$/\1/" || true)
+        if [[ -z "$squash_commit_base" ]]; then
+            break
+        fi
+        branch="$squash_commit_base"
+    done
+
+    local decoration
+    for ((i=0; i < N; i++)); do
+        local ii=$((N - i - 1))
+        [[ $i -eq 0 ]] && decoration="" || decoration="└─ "
+        [[ $i -eq 0 ]] && indent=0 || indent=$((2 * i - 2))
+        printf '%*s%s%s @ %s\n' "$indent" '' "$decoration" "${branches[ii]}" "${shas[ii]}"
+    done
+
+}
+
 function main () {
     if [[ -n "$TARGET_BRANCH" ]]; then
         _info "Checking out target branch $TARGET_BRANCH"
@@ -203,6 +246,12 @@ function main () {
         defer "git checkout --quiet \"$CURRENT_BRANCH\"" EXIT
     else
         TARGET_BRANCH="$CURRENT_BRANCH"
+    fi
+
+    if [[ "$TREE" -eq 1 ]]; then
+        _info "Printing the tree of commits which are rebased on top of one another:"
+        main_tree
+        exit 0
     fi
 
     if [[ "$HARD_MODE" -eq 1 ]]; then
