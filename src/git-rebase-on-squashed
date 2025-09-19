@@ -42,36 +42,23 @@ function _not_implemented() {
     exit 2
 }
 
-
+# Written by Marcin Konowalczyk @lczyk
 # Adapted from post by Richard Hansen:
 # https://stackoverflow.com/a/7287873/2531987
 # CC-BY-SA 3.0
-
-# Appends the command to the front of the existing trap command(s).
-# If the trap is not yet set, sets it to the given command.
-# Usage: defer 'echo hi' EXIT INT
 function defer() {
-    local defer_cmd="$1"
-    shift || _fatal "${FUNCNAME[0]}: no command to add to trap"
-    [[ "$#" -ge 1 ]] || _fatal "${FUNCNAME[0]}: no trap names given"
-    extract_trap_cmd() { printf '%s\n' "$3"; }
+    local defer_cmd="$1"; shift
+    defer_cmd="${defer_cmd%%;}"
+    # shellcheck disable=SC2317
+    _defer_extract() { printf '%s\n' "${3:-}"; }
     for defer_name in "$@"; do
-        local existing_cmd=$(trap -p "${defer_name}")
-        local new_cmd=""
-        if [[ -z "$existing_cmd" ]]; then
-            new_cmd="$defer_cmd"
-        else
-            new_cmd="$(
-                printf '%s\n' "${defer_cmd}"
-                eval "extract_trap_cmd $existing_cmd"
-            )"
-        fi
-        trap -- "$new_cmd" "$defer_name" || _fatal "unable to modify trap ${defer_name}"
+        local existing_cmd=$(eval "_defer_extract $(trap -p "${defer_name}")")
+        existing_cmd=${existing_cmd#'status=$?; '} # remove leading status capture
+        new_cmd="$(printf '%s' 'status=$?; '; printf '%s; ' "${defer_cmd}"; printf '%s' "${existing_cmd}")"
+        trap -- "$new_cmd" "$defer_name" || printf "Error: Unable to modify trap for %s\n" "$defer_name" >&2
     done
+    unset -f _defer_extract _defer_fatal
 }
-# set the trace attribute for the above function. this is
-# required to modify DEBUG or RETURN traps because functions don't
-# inherit them unless the trace attribute is set
 declare -f -t defer
 
 ################################################################################
