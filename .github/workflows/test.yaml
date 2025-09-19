@@ -14,3 +14,5 @@ jobs:
       run: |
         curl -s https://raw.githubusercontent.com/bash-unit/bash_unit/master/install.sh | bash
         FORCE_COLOR=true ./bash_unit tests/test_*
+    - name: Test defer.sh
+      run: bash src/defer.sh --test
