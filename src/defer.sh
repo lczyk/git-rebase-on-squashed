@@ -31,7 +31,8 @@ if [[ -z "${__DEFER_SH__:-}" ]]; then
 
     ############################################################################
     # Self-test when run directly with --test
-    if [[ "${BASH_SOURCE[0]}" == "$0" && "$1" == "--test" ]]; then
+    # bash defer.sh --test
+    if [[ "${#BASH_SOURCE[@]}" -eq 1 && "${BASH_SOURCE[0]}" == "$0" && "$1" == "--test" ]]; then
         function test_basic() {
             test_var=0
             defer "test_var=1" USR1
