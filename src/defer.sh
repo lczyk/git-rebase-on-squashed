@@ -1,3 +1,4 @@
+#!/usr/bin/env -S bash -c 'printf "This file should be sourced, not executed\n"; exit 1'
 # This file is the 'source'able version of defer
 # It can be used in other scripts to provide the 'defer' function
 
